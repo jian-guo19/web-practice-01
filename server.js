@@ -99,7 +99,7 @@ function calculate(expression) {
 
   function parseTerm() {
     let v = parseFactor();
-    for (;;) {
+    for (; ;) {
       skip();
       const op = s[i];
       if (op !== '*' && op !== '/') break;
@@ -117,7 +117,7 @@ function calculate(expression) {
 
   function parseExpr() {
     let v = parseTerm();
-    for (;;) {
+    for (; ;) {
       skip();
       const op = s[i];
       if (op !== '+' && op !== '-') break;
@@ -399,6 +399,56 @@ const server = http.createServer(async (req, res) => {
     }
 
     return res.end();
+  }
+
+  // ---- 静态文件托管：非 /api 的 GET 请求，从 dist 目录提供前端页面 ----
+  if (req.method === 'GET' && !req.url.startsWith('/api')) {
+    const DIST_DIR = path.join(import.meta.dirname, 'dist');
+
+    // dist 目录不存在，提示先构建
+    if (!fs.existsSync(DIST_DIR)) {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('请先运行 npm run build');
+    }
+
+    // 去掉查询串，decode URL，避免中文和特殊字符问题
+    let pathname = decodeURIComponent(req.url.split('?')[0]);
+    // 根路径默认 index.html
+    if (pathname === '/') pathname = '/index.html';
+
+    // 拼接并归一化：用 path.resolve 消除 .. / . 等
+    const filePath = path.resolve(DIST_DIR, '.' + pathname);
+
+    // 安全：必须仍在 dist 目录内，防止路径穿越
+    if (!filePath.startsWith(DIST_DIR + path.sep) && filePath !== DIST_DIR) {
+      res.writeHead(403);
+      return res.end('Forbidden');
+    }
+
+    const MIME = {
+      '.html': 'text/html; charset=utf-8',
+      '.js': 'text/javascript; charset=utf-8',
+      '.css': 'text/css; charset=utf-8',
+      '.svg': 'image/svg+xml',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+    };
+
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      const ext = path.extname(filePath).toLowerCase();
+      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+      return fs.createReadStream(filePath).pipe(res);
+    }
+
+    // 文件不存在（前端路由）→ 回退到 index.html，交给前端路由处理
+    const indexHtml = path.join(DIST_DIR, 'index.html');
+    if (fs.existsSync(indexHtml)) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return fs.createReadStream(indexHtml).pipe(res);
+    }
+
+    res.writeHead(404);
+    return res.end('Not found');
   }
 
   res.writeHead(404);
